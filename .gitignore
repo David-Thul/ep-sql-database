@@ -3,6 +3,37 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# ===========================
+# 2. DATA FILES (CRITICAL)
+# ===========================
+# Ignore actual large files, but strictly keep the folder structure.
+# We assume you will add a empty .gitkeep file to these folders if you want them tracked.
+
+# Raw Inputs (LAS files are huge)
+data/raw_las/*.las
+data/raw_las/*.LAS
+data/raw_las/*.zip
+data/raw_las/*.dlis
+data/raw_las/*.DLIS
+
+# datbase files
+*.db
+data/databases/*.db
+data/databases/*.sqlite
+data/databases/*.sqlite3
+
+# Ops Files (Optionally keep these if small, ignore if sensitive)
+data/ops_files/*.csv
+
+# Interim & Processed Data (Parquet/Pickle are binary and large)
+data/interim/*
+data/processed/*.parquet
+data/processed/*.pkl
+data/processed/*.csv
+
+# Calculated Results (Re-generatable outputs)
+data/calculated/*
+
 # C extensions
 *.so
 
