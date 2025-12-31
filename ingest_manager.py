@@ -2,8 +2,6 @@ import pandas as pd
 import json
 import os
 import lasio
-import numpy as np
-from typing import Any
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -11,157 +9,184 @@ from sqlalchemy.engine import Engine
 # Load env variables
 load_dotenv()
 
-# --- CONFIGURATION ---
-# Get URL safely
 DB_CONNECTION_STR = os.getenv("DB_URL")
 CONFIG_FILE = "field_mapping.json"
 LAKE_STORE_PATH = "./lake_data_parquet"
 
 class SubsurfaceIngestor:
     def __init__(self, db_url: str, config_file: str, capture_unknowns: bool = True):
-        """
-        :param capture_unknowns: If True, unmapped CSV columns are saved to the 'attributes' JSONB column.
-        """
         self.engine: Engine = create_engine(db_url)
         self.capture_unknowns = capture_unknowns
         with open(config_file, 'r') as f:
             self.mappings: dict[str, dict[str, list[str]]] = json.load(f)
 
     def _process_dataframe(self, df: pd.DataFrame, mapping_key: str) -> pd.DataFrame:
-        """
-        Normalizes mapped columns and optionally captures unmapped ones.
-        """
+        """Normalizes mapped columns and optionally captures unmapped ones."""
         target_map = self.mappings[mapping_key]
         rename_map = {}
         mapped_source_cols = set()
 
-        # 1. Build the rename map (CSV Header -> DB Column)
         for target_col, aliases in target_map.items():
             upper_aliases = {a.upper() for a in aliases}
             for csv_col in df.columns:
                 if csv_col.upper() in upper_aliases:
                     rename_map[csv_col] = target_col
                     mapped_source_cols.add(csv_col)
-                    break # First match wins for this target column
+                    break 
         
-        # 2. Rename the known columns
         df_clean = df.rename(columns=rename_map)
         
-        # 3. Handle Unknowns (attributes)
         if self.capture_unknowns:
-            # Identify columns that were NOT mapped
             unknown_cols = [c for c in df.columns if c not in mapped_source_cols]
-            
             if unknown_cols:
-                # Convert these columns to a list of dicts: [{'Rig': 'R1'}, {'Rig': 'R2'}]
-                # We use apply to create a JSON-compatible dict for every row
-                print(f"   -> Capturing {len(unknown_cols)} unknown columns into JSONB.")
+                # Vectorized JSON creation (Much faster than row iteration)
+                print(f"   -> Capturing {len(unknown_cols)} unknown columns.")
                 df_clean['attributes'] = df[unknown_cols].to_dict(orient='records')
             else:
-                df_clean['attributes'] = [{}] * len(df) # Empty dicts if no unknowns
+                df_clean['attributes'] = [{} for _ in range(len(df))]
         else:
-            df_clean['attributes'] = [{}] * len(df)
+            df_clean['attributes'] = [{} for _ in range(len(df))]
 
-        # 4. Filter: Keep only Mapped Columns + 'attributes'
         valid_cols = list(target_map.keys()) + ['attributes']
-        # strictly keep only columns that exist in our clean dataframe
         existing_cols = [c for c in valid_cols if c in df_clean.columns]
-        
         return df_clean[existing_cols]
 
+    def _get_id_map(self, conn, table, key_col, id_col, keys):
+        """
+        Efficiently fetches a dictionary of {key: id} for a list of keys.
+        """
+        if not keys: return {}
+        
+        # Format keys for SQL IN clause safe parameter binding
+        # (Using a simplified approach for bulk fetch)
+        query = text(f"SELECT {key_col}, {id_col} FROM {table} WHERE {key_col} IN :keys")
+        result = conn.execute(query, {"keys": tuple(keys)}).fetchall()
+        return {row[0]: row[1] for row in result}
+
     def ingest_headers_csv(self, csv_path: str) -> None:
-        """Loads well headers with optional JSONB capture."""
         print(f"🔹 Processing Header File: {csv_path}")
-        
-        df = pd.read_csv(csv_path, dtype=str) 
-        
-        # Normalize & Capture
+        df = pd.read_csv(csv_path, dtype=str)
         df = self._process_dataframe(df, "well_header_mappings")
         
-        # Clean UWI
+        # 1. Vectorized Cleanup
+        # Remove non-alphanumeric from UWI
         df['uwi'] = df['uwi'].str.replace(r'[^a-zA-Z0-9]', '', regex=True)
+        
+        # Ensure lat/lon are numeric, coerce errors to NaN
+        df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+        df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
+        
+        # Drop rows with no UWI (Critical)
+        df = df.dropna(subset=['uwi'])
+
+        # Prepare list of dicts for bulk insert
+        records = df.to_dict(orient='records')
+        
+        # 2. Bulk Insert / Upsert Wells
+        # We handle the JSON logic in SQL so we don't need to loop in Python
+        upsert_sql = text("""
+            INSERT INTO well_master (uwi, well_name, operator, surface_geom, attributes)
+            VALUES (:uwi, :well_name, :operator, 
+                    ST_SetSRID(ST_MakePoint(:lon, :lat), 4269), 
+                    :attributes)
+            ON CONFLICT (uwi) DO UPDATE 
+            SET well_name = EXCLUDED.well_name, 
+                operator = EXCLUDED.operator,
+                attributes = well_master.attributes || EXCLUDED.attributes;
+        """)
 
         with self.engine.begin() as conn:
-            for _, row in df.iterrows():
-                # Serialize dict to JSON string if necessary, 
-                # but SQLAlchemy handles dict->jsonb automatically with psycopg2.
-                attrs = row.get('attributes', {})
+            print(f"   -> Bulk upserting {len(records)} wells...")
+            conn.execute(upsert_sql, records)
 
-                sql = text("""
-                    INSERT INTO well_master (uwi, well_name, operator, surface_geom, attributes)
-                    VALUES (:uwi, :name, :op, ST_SetSRID(ST_MakePoint(:lon::numeric, :lat::numeric), 4269), :attrs)
-                    ON CONFLICT (uwi) DO UPDATE 
-                    SET well_name = EXCLUDED.well_name, 
-                        operator = EXCLUDED.operator,
-                        attributes = well_master.attributes || EXCLUDED.attributes 
-                    RETURNING well_id;
-                """)
-                # Note on Update: '||' merges the new JSON attributes with existing ones!
-
-                if pd.isna(row.get('lat')) or pd.isna(row.get('lon')):
-                    print(f"Skipping {row['uwi']} - No coordinates")
-                    continue
-
-                conn.execute(sql, {
-                    "uwi": row['uwi'],
-                    "name": row.get('well_name'),
-                    "op": row.get('operator'),
-                    "lon": row.get('lon'),
-                    "lat": row.get('lat'),
-                    "attrs": json.dumps(attrs) # Explicit dump ensures format
-                })
-                
-                # Ensure Default Wellbore
-                # We need the ID we just inserted/updated to link the wellbore
-                # Re-fetching ID to be safe or using logic to get it from result is tricky in bulk loops without return
-                # Simpler: Just get ID by UWI for the wellbore insert
+            # 3. Handle Wellbores (Bulk)
+            # Fetch all Well IDs for the UWIs we just touched
+            uwi_list = df['uwi'].unique().tolist()
+            well_map = self._get_id_map(conn, 'well_master', 'uwi', 'well_id', uwi_list)
+            
+            # Prepare wellbore records
+            wb_records = []
+            for uwi in uwi_list:
+                if uwi in well_map:
+                    wb_records.append({"well_id": well_map[uwi], "wb_name": "OH"})
+            
+            if wb_records:
+                print(f"   -> Ensuring default wellbores for {len(wb_records)} wells...")
                 conn.execute(text("""
                     INSERT INTO wellbore_master (well_id, wellbore_name)
-                    SELECT well_id, 'OH' FROM well_master WHERE uwi = :uwi
+                    VALUES (:well_id, :wb_name)
                     ON CONFLICT DO NOTHING
-                """), {"uwi": row['uwi']})
-
-        print("✅ Headers Loaded.")
+                """), wb_records)
+                
+        print("✅ Headers Loaded via Bulk Insert.")
 
     def ingest_tops_csv(self, csv_path: str) -> None:
-        """Loads formation tops."""
         print(f"🔹 Processing Tops File: {csv_path}")
         df = pd.read_csv(csv_path)
-        # Note: We typically don't store unknown cols for Tops, but you could add logic here similarly
         df = self._process_dataframe(df, "tops_mappings")
-        df['uwi'] = df['uwi'].astype(str).str.replace(r'[^a-zA-Z0-9]', '', regex=True)
-
-        with self.engine.begin() as conn:
-            for _, row in df.iterrows():
-                # 1. Get Wellbore ID
-                wb_res = conn.execute(text("""
-                    SELECT wb.wellbore_id FROM wellbore_master wb 
-                    JOIN well_master w ON wb.well_id = w.well_id 
-                    WHERE w.uwi = :uwi
-                """), {"uwi": row['uwi']}).scalar()
-
-                if not wb_res:
-                    continue 
-
-                # 2. Get/Create Strat ID
-                strat_id = conn.execute(text("""
-                    WITH ins AS (
-                        INSERT INTO strat_unit_dictionary (unit_name) VALUES (:fm)
-                        ON CONFLICT (unit_name) DO NOTHING RETURNING strat_unit_id
-                    )
-                    SELECT strat_unit_id FROM ins
-                    UNION ALL
-                    SELECT strat_unit_id FROM strat_unit_dictionary WHERE unit_name = :fm
-                    LIMIT 1
-                """), {"fm": row['formation']}).scalar()
-
-                # 3. Insert Top
-                conn.execute(text("""
-                    INSERT INTO formation_tops (wellbore_id, strat_unit_id, depth_md)
-                    VALUES (:wb, :sid, :md)
-                """), {"wb": wb_res, "sid": strat_id, "md": row['depth']})
         
-        print("✅ Tops Loaded.")
+        # Cleanup
+        df['uwi'] = df['uwi'].astype(str).str.replace(r'[^a-zA-Z0-9]', '', regex=True)
+        df['formation'] = df['formation'].str.strip()
+        df = df.dropna(subset=['uwi', 'formation', 'depth'])
+        
+        with self.engine.begin() as conn:
+            # 1. Resolve Strat Units (Formations)
+            unique_fms = df['formation'].unique().tolist()
+            
+            # Insert new formations if they don't exist
+            conn.execute(text("""
+                INSERT INTO strat_unit_dictionary (unit_name)
+                VALUES (:unit_name)
+                ON CONFLICT (unit_name) DO NOTHING
+            """), [{"unit_name": fm} for fm in unique_fms])
+            
+            # Fetch Map: {'Eagle Ford': 101, 'Austin Chalk': 102}
+            strat_map = self._get_id_map(conn, 'strat_unit_dictionary', 'unit_name', 'strat_unit_id', unique_fms)
+            
+            # 2. Resolve Wellbores
+            # We need to link UWI -> Well -> Wellbore
+            # (Assuming primary wellbore 'OH' for simplicity, or could be expanded)
+            unique_uwis = df['uwi'].unique().tolist()
+            
+            # Join query to get UWI -> Wellbore_ID directly
+            wb_query = text("""
+                SELECT w.uwi, wb.wellbore_id 
+                FROM wellbore_master wb 
+                JOIN well_master w ON wb.well_id = w.well_id 
+                WHERE w.uwi IN :uwis
+            """)
+            wb_res = conn.execute(wb_query, {"uwis": tuple(unique_uwis)}).fetchall()
+            wb_map = {row[0]: row[1] for row in wb_res}
+            
+            # 3. Map IDs to DataFrame
+            # (Vectorized mapping is faster than row iteration)
+            df['strat_unit_id'] = df['formation'].map(strat_map)
+            df['wellbore_id'] = df['uwi'].map(wb_map)
+            
+            # Drop rows where we couldn't find the well or the formation
+            missing_wells = df[df['wellbore_id'].isna()]
+            if not missing_wells.empty:
+                print(f"   ⚠️ Skipping {len(missing_wells)} tops (Wells not found in DB)")
+            
+            valid_tops = df.dropna(subset=['wellbore_id', 'strat_unit_id']).copy()
+            
+            # 4. Bulk Insert Tops
+            if not valid_tops.empty:
+                tops_records = valid_tops[[
+                    'wellbore_id', 'strat_unit_id', 'depth', 
+                    'interpreter', 'quality'
+                ]].to_dict(orient='records')
+                
+                # Rename columns to match SQL bind params if needed, or alias in SQL
+                # Here we map DF column names to bind params
+                print(f"   -> Bulk inserting {len(tops_records)} tops...")
+                conn.execute(text("""
+                    INSERT INTO formation_tops (wellbore_id, strat_unit_id, depth_md, interpreter, pick_quality)
+                    VALUES (:wellbore_id, :strat_unit_id, :depth, :interpreter, :quality)
+                """), tops_records)
+
+        print("✅ Tops Loaded via Bulk Insert.")
 
     def ingest_las_file(self, las_path: str) -> None:
         # (Same as previous version - LAS logic is distinct from CSV mapping)
