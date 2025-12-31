@@ -1,0 +1,118 @@
+{
+    "well_header_mappings": {
+        "uwi": [
+            "API", "API_NUM", "API_NUMBER", "UWI", "UNIQUE_WELL_ID", 
+            "WELL_ID", "STATE_ID", "GOV_ID", "API10", "API14"
+        ],
+        "well_name": [
+            "WELL_NAME", "WELLNAME", "NAME", "LEASE_NAME", "LEASE", 
+            "FULL_NAME", "WELL_LABEL", "DESIGNATION"
+        ],
+        "well_number": [
+            "WELL_NUMBER", "WELL_NO", "WELL_NUM", "NO", "NUM", "#"
+        ],
+        "operator": [
+            "OPERATOR", "OP_NAME", "CURRENT_OPERATOR", "OPERATOR_NAME", 
+            "COMPANY", "CLIENT", "OP", "OPERATOR_ABBREV"
+        ],
+        "spud_date": [
+            "SPUD_DATE", "SPUD", "DATE_SPUDDED", "SPUDDED", 
+            "DRILL_START_DATE", "SPUDDATE"
+        ],
+        "completion_date": [
+            "COMPLETION_DATE", "COMP_DATE", "RR_DATE", "RIG_RELEASE", 
+            "DATE_COMPLETED", "TD_DATE"
+        ],
+        "lat": [
+            "LATITUDE", "LAT", "SURFACE_LATITUDE", "SURFACE_LAT", 
+            "Y", "Y_COORD", "SH_LAT", "BH_LAT"
+        ],
+        "lon": [
+            "LONGITUDE", "LON", "LONG", "SURFACE_LONGITUDE", 
+            "SURFACE_LONG", "X", "X_COORD", "SH_LON", "BH_LON"
+        ],
+        "elevation": [
+            "ELEVATION", "ELEV", "KB", "KB_ELEV", "GL", "GL_ELEV", 
+            "KELLY_BUSHING", "GROUND_LEVEL", "REF_DATUM_ELEV"
+        ],
+        "total_depth": [
+            "TD", "TOTAL_DEPTH", "MD_TD", "DRILLER_TD", "LOGGER_TD", 
+            "MAX_DEPTH", "DEPTH_TOTAL"
+        ],
+        "county": [
+            "COUNTY", "PARISH", "CNTY", "COUNTY_NAME"
+        ],
+        "state": [
+            "STATE", "PROVINCE", "ST", "STATE_NAME"
+        ],
+        "field": [
+            "FIELD", "FIELD_NAME", "DISTRICT", "POOL"
+        ],
+        "status": [
+             "STATUS", "CURRENT_STATUS", "WELL_STATUS", "WELL_TYPE",
+             "PROFILE_TYPE"
+        ]
+    },
+    
+    "tops_mappings": {
+        "uwi": [
+            "API", "UWI", "WELL_ID", "UNIQUE_WELL_ID", "API_NUM"
+        ],
+        "formation": [
+            "FORMATION", "FM", "FM_NAME", "ZONE", "STRAT_UNIT", 
+            "MARKER", "PICK_NAME", "FORM_ALIAS"
+        ],
+        "depth": [
+            "DEPTH", "MD", "PICK_DEPTH", "TOP", "TOP_MD", 
+            "OBSERVED_DEPTH", "MARKER_DEPTH"
+        ],
+        "quality": [
+            "QUALITY", "CONFIDENCE", "GRADE", "PICK_QUAL", 
+            "QUAL"
+        ],
+        "interpreter": [
+            "INTERPRETER", "PICKED_BY", "AUTHOR", "SOURCE", 
+            "ANALYST"
+        ]
+    },
+
+    "rock_sample_mappings": {
+        "uwi": [
+            "API", "UWI", "WELL_ID"
+        ],
+        "sample_type": [
+            "SAMPLE_TYPE", "TYPE", "CORE_TYPE" 
+            /* e.g., 'Conventional Core', 'Sidewall', 'Cuttings' */
+        ],
+        "name": [
+             "SAMPLE_ID", "BOX_NUM", "CORE_NUM", "LAB_ID"
+        ],
+        "top_depth": [
+            "TOP", "TOP_DEPTH", "START_DEPTH", "CORE_TOP"
+        ],
+        "base_depth": [
+            "BASE", "BASE_DEPTH", "END_DEPTH", "CORE_BOTTOM", "BOTTOM"
+        ]
+    },
+    
+    "production_mappings": {
+        "uwi": [
+             "API", "UWI", "WELL_ID", "API_NUMBER"
+        ],
+        "date": [
+             "DATE", "PROD_DATE", "REPORT_DATE", "MONTH", "P_DATE"
+        ],
+        "oil": [
+             "OIL", "OIL_VOL", "LIQUID", "BO", "MONTHLY_OIL"
+        ],
+        "gas": [
+             "GAS", "GAS_VOL", "MCF", "MONTHLY_GAS"
+        ],
+        "water": [
+             "WATER", "H2O", "WTR", "WATER_VOL", "BW", "MONTHLY_WATER"
+        ],
+        "days": [
+             "DAYS", "DAYS_ON", "PROD_DAYS", "HOURS_ON"
+        ]
+    }
+}

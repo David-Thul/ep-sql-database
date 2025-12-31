@@ -1,0 +1,50 @@
+name: subsurface_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # --- Core Python & Data Science ---
+  - python=3.12
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  
+  # --- Database & SQL (Critical for this project) ---
+  - sqlalchemy      # ORM for Python <-> DB
+  - psycopg2        # PostgreSQL adapter (binary version)
+  - geoalchemy2     # Spatial extension for SQLAlchemy
+  
+  # --- Geospatial (Move to Conda to avoid GDAL hell) ---
+  - geopandas       # Spatial DataFrames
+  - rasterio        # Raster I/O
+  - shapely         # Geometric objects
+  - fiona           # Vector I/O
+  
+  # --- High-Performance I/O ---
+  - pyarrow         # Parquet engine
+  - fastparquet     # Alternative Parquet engine
+  - snappy          # Compression
+  
+  # --- Visualization ---
+  - matplotlib
+  - seaborn
+  
+  # --- Interactive Notebooks ---
+  - jupyter
+  - notebook
+  - ipykernel
+  
+  # --- Utilities ---
+  - tqdm            # Progress bars
+  - openpyxl        # Excel support
+  - python-dotenv   # Environment variable management
+  - pip             # Fallback package manager
+
+  # --- PIP Fallback (Pure Python / Niche Subsurface) ---
+  - pip:
+    - lasio         # LAS file reader
+    - dlisio        # DLIS file reader
+    - welly         # Well log visualization & management
+    - striplog      # Stratigraphic log management
+    - segyio        # Seismic data (optional, but good to have)
