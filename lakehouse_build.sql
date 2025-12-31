@@ -11,11 +11,13 @@ CREATE TABLE well_master (
     spud_date           DATE,
     
     -- GEOMETRY (NAD83)
-    surface_geom        GEOMETRY(POINT, 4269), --'CRS: NAD83 (EPSG:4269).'
+    surface_geom        GEOMETRY(POINT, 4269), 
+    
+    -- ELEVATION (Required for Subsea TVD calculations)
+    elevation_kb        REAL, -- 'UNIT: Feet. Height of reference datum above sea level.'
     
     attributes          JSONB DEFAULT '{}',
     
-    -- Audit Columns (Fix 2)
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -48,15 +50,25 @@ CREATE TABLE strat_unit_dictionary (
 );
 
 CREATE TABLE formation_tops (
-    top_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+   top_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     wellbore_id         UUID REFERENCES wellbore_master(wellbore_id) ON DELETE CASCADE,
     strat_unit_id       INTEGER REFERENCES strat_unit_dictionary(strat_unit_id),
     
-    depth_md            REAL NOT NULL, --'UNIT: Feet (Imperial).'
+    -- MEASURED DEPTH (Input)
+    depth_md            REAL NOT NULL, -- 'UNIT: Feet. The input from the geologist.'
+    
+    -- CALCULATED DEPTHS (Output from Trajectory Processor)
+    depth_tvd           REAL,          -- 'UNIT: Feet. True Vertical Depth.'
+    depth_tvd_ss        REAL,          -- 'UNIT: Feet. Subsea TVD (Elevation - TVD).'
+    
     interpreter         VARCHAR(100),
     pick_quality        VARCHAR(50),
     
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- Prevent duplicate picks for the same formation in the same hole
+    CONSTRAINT uq_well_strat UNIQUE (wellbore_id, strat_unit_id, interpreter)
 );
 
 -- 5. CURVE CATALOG (The Lakehouse Index)
