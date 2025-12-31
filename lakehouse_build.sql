@@ -48,7 +48,6 @@ CREATE TABLE strat_unit_dictionary (
 );
 
 CREATE TABLE formation_tops (
-    CREATE TABLE formation_tops (
     top_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     wellbore_id         UUID REFERENCES wellbore_master(wellbore_id) ON DELETE CASCADE,
     strat_unit_id       INTEGER REFERENCES strat_unit_dictionary(strat_unit_id),
