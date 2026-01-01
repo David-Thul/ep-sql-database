@@ -1,25 +1,50 @@
 import os
 import re
+import json
 from pathlib import Path
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from dotenv import load_dotenv
+
+# Load environment variables if .env exists
+load_dotenv()
 
 class MediaLoader:
-    def __init__(self, engine: Engine):
-        self.engine = engine
+    def __init__(self, db_url: str):
+        self.engine = create_engine(db_url)
         
         # --- REGEX PATTERNS ---
         
-        # 1. Find API/UWI (10-14 digits, ignoring surrounding numbers)
-        self.regex_uwi = re.compile(r'(?<!\d)(\d{10,14})(?!\d)')
-        
-        # 2. Find Depth Ranges (e.g., "3500-3510", "3500_to_3510")
+        # 1. Depth Ranges (e.g., "3500-3510", "3500_to_3510")
         # Captures Group 1 (Top) and Group 2 (Base)
         self.regex_depth_range = re.compile(r'[-_ ](\d{1,5}(?:\.\d+)?)[-_ ](?:to|[-_])[-_ ]?(\d{1,5}(?:\.\d+)?)(?=[^\d]|$)', re.IGNORECASE)
         
-        # 3. Find Single Depth (e.g., "3500ft", "_3500_")
+        # 2. Single Depth (e.g., "3500ft", "_3500_")
         # Captures Group 1 (Depth)
         self.regex_single_depth = re.compile(r'[-_ ](\d{1,5}(?:\.\d+)?)(?:ft|m|md)?(?=[-_ .]|$)', re.IGNORECASE)
+
+    def _preload_well_cache(self, conn):
+        """
+        Fetches all known UWIs from the database to create a fast lookup map.
+        Returns: { '42123456780000': 'uuid-of-wellbore', ... }
+        """
+        print("   -> Pre-loading well inventory...")
+        # We strip non-numeric characters from the DB UWI to ensure matching works
+        # regardless of how it's stored (dashed or not).
+        # We prioritize the 'OH' (Open Hole) wellbore, but you could adjust this logic.
+        sql = text("""
+            SELECT 
+                regexp_replace(w.uwi, '[^0-9]', '', 'g') as clean_uwi,
+                wb.wellbore_id
+            FROM wellbore_master wb
+            JOIN well_master w ON wb.well_id = w.well_id
+            WHERE wb.wellbore_name = 'OH' 
+        """)
+        
+        rows = conn.execute(sql).fetchall()
+        cache = {row[0]: row[1] for row in rows}
+        print(f"   -> Cached {len(cache)} wells for rapid matching.")
+        return cache
 
     def _infer_media_context(self, filename: str):
         """
@@ -92,7 +117,7 @@ class MediaLoader:
 
     def scan_directory(self, root_path: str):
         """
-        Recursively scans a directory, links files to Wells (via UWI), 
+        Recursively scans a directory, matches files to cached Wells, 
         extracts metadata, and loads into DB.
         """
         print(f"🚀 Starting Media Scan: {root_path}")
@@ -106,13 +131,10 @@ class MediaLoader:
         skipped_files = 0
         errors = 0
 
-        # Cache well IDs to reduce DB hits
-        # Dictionary: { "4200012345": "uuid-string", ... }
-        uwi_cache = {} 
-
-        # Begin DB Transaction
         with self.engine.begin() as conn:
-            
+            # 1. Build the Cache (The robust fix)
+            uwi_cache = self._preload_well_cache(conn)
+
             for file_path in root.rglob('*'):
                 if not file_path.is_file():
                     continue
@@ -121,39 +143,33 @@ class MediaLoader:
                 if file_path.name.startswith('.'):
                     continue
 
-                # 1. FIND UWI (Check filename first, then parent folder name)
-                # This handles: /Data/4200012345/photos/box1.jpg
-                full_path_str = str(file_path.absolute())
-                match = self.regex_uwi.search(full_path_str)
+                # 2. MATCH UWI (The Robust "Clean & Check" Method)
+                # Strip everything except numbers from the filename
+                # Example: "Eagle_Ford-42-123-45678_Box1.jpg" -> "42123456781"
+                clean_name = re.sub(r'[^0-9]', '', file_path.name)
                 
-                if not match:
+                # Also check parent folder name if filename is generic (e.g. "photo1.jpg")
+                clean_parent = re.sub(r'[^0-9]', '', file_path.parent.name)
+                
+                # Find candidate UWIs (10 to 14 digits) inside the cleaned strings
+                # We use a set to avoid duplicates
+                candidates = set(re.findall(r'\d{10,14}', clean_name))
+                candidates.update(re.findall(r'\d{10,14}', clean_parent))
+                
+                matched_wb_id = None
+                
+                # Check candidates against our DB cache
+                for cand in candidates:
+                    if cand in uwi_cache:
+                        matched_wb_id = uwi_cache[cand]
+                        break # Found a match, stop looking
+                
+                if not matched_wb_id:
                     skipped_files += 1
-                    continue # No UWI found
-                
-                uwi_raw = match.group(1)
-
-                # 2. RESOLVE DB ID
-                if uwi_raw in uwi_cache:
-                    wb_id = uwi_cache[uwi_raw]
-                else:
-                    # Look up in DB
-                    # We use LIKE because file might say '42123...' but DB has '42-123...'
-                    # (Standardize your UWIs in DB to numbers-only to avoid this pain!)
-                    res = conn.execute(text("""
-                        SELECT wb.wellbore_id 
-                        FROM wellbore_master wb 
-                        JOIN well_master w ON wb.well_id = w.well_id 
-                        WHERE regexp_replace(w.uwi, '[^0-9]', '', 'g') = :uwi
-                    """), {"uwi": uwi_raw}).scalar()
-                    
-                    if res:
-                        uwi_cache[uwi_raw] = res
-                        wb_id = res
-                    else:
-                        # Well not in DB, skip
-                        continue
+                    continue # No known well found in filename
 
                 # 3. CHECK DUPLICATES
+                full_path_str = str(file_path.absolute())
                 exists = conn.execute(text(
                     "SELECT 1 FROM media_catalog WHERE file_path = :p"
                 ), {"p": full_path_str}).scalar()
@@ -174,7 +190,7 @@ class MediaLoader:
                         VALUES 
                         (:wb, :type, :fmt, :path, :top, :base, :desc)
                     """), {
-                        "wb": wb_id,
+                        "wb": matched_wb_id,
                         "type": media_type,
                         "fmt": file_path.suffix.lstrip('.').lower(),
                         "path": full_path_str,
@@ -192,18 +208,20 @@ class MediaLoader:
 
         print(f"✅ Scan Complete.")
         print(f"   - New Files Linked: {new_files}")
-        print(f"   - Wells Identified: {len(uwi_cache)}")
-        print(f"   - Skipped (No UWI): {skipped_files}")
+        print(f"   - Skipped (No Match): {skipped_files}")
+        print(f"   - Errors: {errors}")
 
 # --- EXAMPLE USAGE ---
 if __name__ == "__main__":
-    from sqlalchemy import create_engine
+    # Ensure you have your DB_URL set in .env or hardcoded here for testing
+    # DB_URL = "postgresql+psycopg2://postgres:password@localhost/subsurface_db"
     
-    # Setup
-    DB_URL = "postgresql+psycopg2://postgres:password@localhost/subsurface_db"
-    engine = create_engine(DB_URL)
-    
-    loader = MediaLoader(engine)
-    
-    # Point this at your raw data dump
-    # loader.scan_directory("D:/Data/Core_Analysis_Project")
+    db_url = os.getenv("DB_URL")
+    if not db_url:
+        print("❌ DB_URL not found in environment.")
+    else:
+        # Initialize Loader
+        loader = MediaLoader(db_url)
+        
+        # Point this at your raw data dump
+        # loader.scan_directory("/path/to/your/data/drive")
