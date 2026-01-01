@@ -48,3 +48,4 @@ dependencies:
     - welly         # Well log visualization & management
     - striplog      # Stratigraphic log management
     - segyio        # Seismic data (optional, but good to have)
+    - pyproj        # Coordinate transformations 
