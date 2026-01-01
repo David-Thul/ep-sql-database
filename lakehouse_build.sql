@@ -50,7 +50,7 @@ CREATE TABLE strat_unit_dictionary (
 );
 
 CREATE TABLE formation_tops (
-   top_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    top_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     wellbore_id         UUID REFERENCES wellbore_master(wellbore_id) ON DELETE CASCADE,
     strat_unit_id       INTEGER REFERENCES strat_unit_dictionary(strat_unit_id),
     
@@ -61,15 +61,27 @@ CREATE TABLE formation_tops (
     depth_tvd           REAL,          -- 'UNIT: Feet. True Vertical Depth.'
     depth_tvd_ss        REAL,          -- 'UNIT: Feet. Subsea TVD (Elevation - TVD).'
     
+    -- GEOLOGY CONTEXT
     interpreter         VARCHAR(100),
-    pick_quality        VARCHAR(50),
+    pick_quality        VARCHAR(50), -- 'P1', 'P2', 'P3' or 'Good/Fair/Poor'
+    
+    -- FAULTING SUPPORT (The Fix)
+    -- 'occurrence' allows multiple picks of the same formation in one well.
+    -- Default is 1. If you hit a reverse fault and see the formation again, that's occurrence 2.
+    occurrence          INTEGER DEFAULT 1, 
+    feature_context     VARCHAR(100), -- Optional: 'Upthrown Block', 'Downthrown Block', 'Repeated Section'
     
     created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    -- Prevent duplicate picks for the same formation in the same hole
-    CONSTRAINT uq_well_strat UNIQUE (wellbore_id, strat_unit_id, interpreter)
+    -- CONSTRAINT: Structural Uniqueness
+    -- We allow duplicate formation names in a well ONLY if they have different occurrences.
+    CONSTRAINT uq_well_strat_occurrence UNIQUE (wellbore_id, strat_unit_id, interpreter, occurrence)
 );
+
+-- Indexing for common geology queries ("Show me all Eagle Ford picks")
+CREATE INDEX idx_tops_strat_unit ON formation_tops(strat_unit_id);
+CREATE INDEX idx_tops_wellbore ON formation_tops(wellbore_id);
 
 -- 5. CURVE CATALOG (The Lakehouse Index)
 CREATE TABLE curve_catalog (
