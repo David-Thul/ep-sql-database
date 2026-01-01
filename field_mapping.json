@@ -85,7 +85,7 @@
             /* e.g., 'Conventional Core', 'Sidewall', 'Cuttings' */
         ],
         "name": [
-             "SAMPLE_ID", "BOX_NUM", "CORE_NUM", "LAB_ID"
+            "SAMPLE_ID", "BOX_NUM", "CORE_NUM", "LAB_ID"
         ],
         "top_depth": [
             "TOP", "TOP_DEPTH", "START_DEPTH", "CORE_TOP"
@@ -97,22 +97,52 @@
     
     "production_mappings": {
         "uwi": [
-             "API", "UWI", "WELL_ID", "API_NUMBER"
+            "API", "UWI", "WELL_ID", "API_NUMBER"
         ],
         "date": [
-             "DATE", "PROD_DATE", "REPORT_DATE", "MONTH", "P_DATE"
+            "DATE", "PROD_DATE", "REPORT_DATE", "MONTH", "P_DATE"
         ],
         "oil": [
-             "OIL", "OIL_VOL", "LIQUID", "BO", "MONTHLY_OIL"
+            "OIL", "OIL_VOL", "LIQUID", "BO", "MONTHLY_OIL"
         ],
         "gas": [
-             "GAS", "GAS_VOL", "MCF", "MONTHLY_GAS"
+            "GAS", "GAS_VOL", "MCF", "MONTHLY_GAS"
         ],
         "water": [
-             "WATER", "H2O", "WTR", "WATER_VOL", "BW", "MONTHLY_WATER"
+            "WATER", "H2O", "WTR", "WATER_VOL", "BW", "MONTHLY_WATER"
         ],
         "days": [
-             "DAYS", "DAYS_ON", "PROD_DAYS", "HOURS_ON"
+            "DAYS", "DAYS_ON", "PROD_DAYS", "HOURS_ON"
+        ]
+    },
+
+    "daily_mappings": {
+        "uwi": [
+            "API", "UWI", "WELL_ID"
+        ],
+        "date": [
+            "Date", "ReportDate"
+        ],
+        "oil": [
+            "Oil", "OilVolume"
+        ],
+        "gas": [
+            "Gas", "GasVolume"
+        ],
+        "water": [
+            "Water", "WaterVolume"
+        ],
+        "hours_on": [
+            "Hours", "RunTime", "HrsOn"
+        ],
+        "tubing_pressure": [
+            "THP", "TbgPress", "TubingPressure"
+        ],
+        "casing_pressure": [
+            "CHP", "CsgPress", "CasingPressure"
+        ],
+        "choke_size": [
+            "Choke", "ChokeSize"
         ]
     }
 }
